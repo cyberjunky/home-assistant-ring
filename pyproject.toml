@@ -9,6 +9,12 @@ license = { text = "Apache-2.0" }
 test = [
     "pytest-homeassistant==2026.11.1",
     "python-ring==0.10.0",
+    # camera, stream and ffmpeg dependencies of the ring integration
+    "av==19.0.0",
+    "ha-ffmpeg==3.2.2",
+    "mutagen==1.48.1",
+    "numpy==2.3.2",
+    "PyTurboJPEG==1.8.3",
 ]
 
 [tool.pytest.ini_options]
