@@ -131,7 +131,7 @@ async def test_snooze_can_be_set_and_cleared(
 
     state = hass.states.get(entity_id)
     assert state is not None
-    assert state.state == "0"
+    assert state.state == "0.0"
 
     await hass.services.async_call(
         NUMBER_DOMAIN,
@@ -142,7 +142,7 @@ async def test_snooze_can_be_set_and_cleared(
     getattr(device, set_method).assert_called_once_with(30)
     state = hass.states.get(entity_id)
     assert state is not None
-    assert state.state == "30"
+    assert state.state == "30.0"
 
     await hass.services.async_call(
         NUMBER_DOMAIN,
@@ -153,4 +153,4 @@ async def test_snooze_can_be_set_and_cleared(
     getattr(device, clear_method).assert_called_once_with()
     state = hass.states.get(entity_id)
     assert state is not None
-    assert state.state == "0"
+    assert state.state == "0.0"
