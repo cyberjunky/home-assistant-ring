@@ -3,7 +3,6 @@
 from unittest.mock import patch
 
 from freezegun.api import FrozenDateTimeFactory
-from homeassistant.components import ring
 from homeassistant.components.binary_sensor import DOMAIN as BINARY_SENSOR_DOMAIN
 from homeassistant.components.camera import DOMAIN as CAMERA_DOMAIN
 from homeassistant.components.light import DOMAIN as LIGHT_DOMAIN
@@ -17,6 +16,7 @@ from pytest_homeassistant.common import MockConfigEntry, async_fire_time_changed
 from python_ring import AuthenticationError, Ring, RingError, RingTimeout
 from syrupy.assertion import SnapshotAssertion
 
+from custom_components import ring
 from custom_components.ring import DOMAIN
 from custom_components.ring.const import (
     CONF_CONFIG_ENTRY_MINOR_VERSION,
