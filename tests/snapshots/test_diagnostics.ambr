@@ -342,6 +342,7 @@
           'connection': 'online',
         }),
         'battery_life': 80,
+        'battery_life_2': 60,
         'description': '**REDACTED**',
         'device_id': '**REDACTED**',
         'external_connection': False,

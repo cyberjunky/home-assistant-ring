@@ -68,6 +68,12 @@
     'capabilities': dict({
       <EventEntityCapabilityAttribute.EVENT_TYPES: 'event_types'>: list([
         'motion',
+        'human',
+        'loitering',
+        'moving_vehicle',
+        'other_motion',
+        'package_delivery',
+        'package_pickup',
       ]),
     }),
     'config_entry_id': <ANY>,
@@ -108,6 +114,12 @@
       <EventEntityStateAttribute.EVENT_TYPE: 'event_type'>: None,
       <EventEntityCapabilityAttribute.EVENT_TYPES: 'event_types'>: list([
         'motion',
+        'human',
+        'loitering',
+        'moving_vehicle',
+        'other_motion',
+        'package_delivery',
+        'package_pickup',
       ]),
       <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Front Door Motion',
     }),
@@ -128,6 +140,12 @@
     'capabilities': dict({
       <EventEntityCapabilityAttribute.EVENT_TYPES: 'event_types'>: list([
         'motion',
+        'human',
+        'loitering',
+        'moving_vehicle',
+        'other_motion',
+        'package_delivery',
+        'package_pickup',
       ]),
     }),
     'config_entry_id': <ANY>,
@@ -168,6 +186,12 @@
       <EventEntityStateAttribute.EVENT_TYPE: 'event_type'>: None,
       <EventEntityCapabilityAttribute.EVENT_TYPES: 'event_types'>: list([
         'motion',
+        'human',
+        'loitering',
+        'moving_vehicle',
+        'other_motion',
+        'package_delivery',
+        'package_pickup',
       ]),
       <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Front Motion',
     }),
@@ -308,6 +332,12 @@
     'capabilities': dict({
       <EventEntityCapabilityAttribute.EVENT_TYPES: 'event_types'>: list([
         'motion',
+        'human',
+        'loitering',
+        'moving_vehicle',
+        'other_motion',
+        'package_delivery',
+        'package_pickup',
       ]),
     }),
     'config_entry_id': <ANY>,
@@ -348,6 +378,12 @@
       <EventEntityStateAttribute.EVENT_TYPE: 'event_type'>: None,
       <EventEntityCapabilityAttribute.EVENT_TYPES: 'event_types'>: list([
         'motion',
+        'human',
+        'loitering',
+        'moving_vehicle',
+        'other_motion',
+        'package_delivery',
+        'package_pickup',
       ]),
       <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Internal Motion',
     }),
