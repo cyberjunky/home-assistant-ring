@@ -6,17 +6,20 @@ from unittest.mock import AsyncMock, Mock, patch
 from aiohttp.test_utils import make_mocked_request
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.camera import (
+    DOMAIN as CAMERA_DOMAIN,
     CameraEntityFeature,
     StreamType,
     async_get_image,
     async_get_mjpeg_stream,
     get_camera_from_entity_id,
 )
+from homeassistant.components.labs import async_update_preview_feature
 from homeassistant.config_entries import SOURCE_REAUTH
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
+from homeassistant.setup import async_setup_component
 from homeassistant.util.aiohttp import MockStreamReader
 import pytest
 from pytest_homeassistant.common import async_fire_time_changed, snapshot_platform
@@ -25,11 +28,14 @@ import python_ring
 from python_ring.webrtcstream import RingWebRtcMessage
 from syrupy.assertion import SnapshotAssertion
 
-from custom_components.ring.camera import FORCE_REFRESH_INTERVAL
+from custom_components.ring.camera import (
+    FORCE_REFRESH_INTERVAL,
+    SNAPSHOT_CACHE_INTERVAL,
+)
 from custom_components.ring.const import SCAN_INTERVAL
 
 from .common import MockConfigEntry, setup_platform
-from .device_mocks import FRONT_DEVICE_ID
+from .device_mocks import FRONT_DEVICE_ID, INGRESS_DEVICE_ID
 
 SMALLEST_VALID_JPEG = (
     "ffd8ffe000104a46494600010101004800480000ffdb00430003020202020203020202030303030406040404040408060"
@@ -380,6 +386,70 @@ async def test_camera_stream_attributes(
     assert supported_features is CameraEntityFeature(0)
     camera = get_camera_from_entity_id(hass, "camera.front_last_recording")
     assert camera.camera_capabilities.frontend_stream_types == set()
+
+
+@pytest.mark.usefixtures("entity_registry_enabled_by_default")
+@pytest.mark.parametrize(
+    ("entity_id", "labs_enabled", "expected_two_way_audio"),
+    [
+        pytest.param("camera.front_live_view", True, True, id="live_view"),
+        pytest.param("camera.front_live_view", False, False, id="labs_disabled"),
+        pytest.param("camera.front_last_recording", True, False, id="last_recording"),
+    ],
+)
+async def test_camera_two_way_audio(
+    hass: HomeAssistant,
+    mock_ring_client: Mock,
+    hass_ws_client: WebSocketGenerator,
+    entity_id: str,
+    labs_enabled: bool,
+    expected_two_way_audio: bool,
+) -> None:
+    """Test two way audio capability of the camera entities."""
+    assert await async_setup_component(hass, "labs", {})
+    assert await async_setup_component(hass, CAMERA_DOMAIN, {})
+    await async_update_preview_feature(
+        hass, CAMERA_DOMAIN, "two_way_audio", labs_enabled
+    )
+    await setup_platform(hass, Platform.CAMERA)
+
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {"type": "camera/capabilities", "entity_id": entity_id}
+    )
+    msg = await client.receive_json()
+    assert msg["success"]
+    assert msg["result"]["two_way_audio"] is expected_two_way_audio
+
+
+async def test_intercom_video_snapshot_is_cached(
+    hass: HomeAssistant,
+    mock_ring_client: Mock,
+    mock_ring_devices,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Test an intercom with video serves a snapshot and reuses a recent one."""
+    intercom_mock = mock_ring_devices.get_device(INGRESS_DEVICE_ID)
+    has_capability = intercom_mock.has_capability.side_effect
+    intercom_mock.has_capability.side_effect = lambda capability: (
+        capability == python_ring.RingCapability.VIDEO or has_capability(capability)
+    )
+    intercom_mock.async_take_snapshot = AsyncMock(
+        return_value=SMALLEST_VALID_JPEG_BYTES
+    )
+    await setup_platform(hass, Platform.CAMERA)
+
+    assert hass.states.get("camera.ingress_live_view") is not None
+    assert hass.states.get("camera.ingress_last_recording") is None
+
+    image = await async_get_image(hass, "camera.ingress_live_view")
+    assert image.content == SMALLEST_VALID_JPEG_BYTES
+    await async_get_image(hass, "camera.ingress_live_view")
+    intercom_mock.async_take_snapshot.assert_called_once()
+
+    freezer.tick(SNAPSHOT_CACHE_INTERVAL)
+    await async_get_image(hass, "camera.ingress_live_view")
+    assert intercom_mock.async_take_snapshot.call_count == 2
 
 
 async def test_camera_webrtc(

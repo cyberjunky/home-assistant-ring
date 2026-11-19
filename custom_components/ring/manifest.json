@@ -1,6 +1,10 @@
 {
   "domain": "ring",
   "name": "Ring",
+  "categories": [
+    "security_safety.doorbells_intercoms",
+    "security_safety.cameras"
+  ],
   "codeowners": [
     "@cyberjunky"
   ],

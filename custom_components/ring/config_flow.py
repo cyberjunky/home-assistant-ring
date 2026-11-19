@@ -11,13 +11,7 @@ from homeassistant.config_entries import (
     ConfigFlow,
     ConfigFlowResult,
 )
-from homeassistant.const import (
-    CONF_DEVICE_ID,
-    CONF_NAME,
-    CONF_PASSWORD,
-    CONF_TOKEN,
-    CONF_USERNAME,
-)
+from homeassistant.const import CONF_DEVICE_ID, CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
@@ -206,8 +200,8 @@ class RingConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=STEP_REAUTH_DATA_SCHEMA,
             errors=errors,
             description_placeholders={
-                CONF_USERNAME: reauth_entry.data[CONF_USERNAME],
-                CONF_NAME: reauth_entry.data[CONF_USERNAME],
+                "username": reauth_entry.data[CONF_USERNAME],
+                "name": reauth_entry.data[CONF_USERNAME],
             },
         )
 
@@ -238,7 +232,7 @@ class RingConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "unknown"
             else:
                 data_updates = {
-                    CONF_USERNAME: username,
+                    "username": username,
                     CONF_TOKEN: token,
                     CONF_DEVICE_ID: self.hardware_id,
                 }
@@ -251,7 +245,7 @@ class RingConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=STEP_RECONFIGURE_DATA_SCHEMA,
             errors=errors,
             description_placeholders={
-                CONF_USERNAME: username,
+                "username": username,
             },
         )
 
