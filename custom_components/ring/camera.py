@@ -11,6 +11,7 @@ from haffmpeg.camera import CameraMjpeg
 from homeassistant.components import ffmpeg
 from homeassistant.components.camera import (
     Camera,
+    CameraEntityCapabilities,
     CameraEntityDescription,
     CameraEntityFeature,
     WebRTCAnswer,
@@ -36,6 +37,8 @@ from .entity import RingDeviceT, RingEntity, exception_wrap
 PARALLEL_UPDATES = 1
 
 FORCE_REFRESH_INTERVAL = timedelta(minutes=3)
+# Devices without recordings serve a snapshot; reuse it for this long
+SNAPSHOT_CACHE_INTERVAL = timedelta(seconds=30)
 MOTION_DETECTION_CAPABILITY = "motion_detection"
 
 _LOGGER = logging.getLogger(__name__)
@@ -128,6 +131,8 @@ class RingCam(RingEntity[RingCameraDevice], Camera):
         self._video_url: str | None = None
         self._images: dict[tuple[int | None, int | None], bytes] = {}
         self._expires_at = dt_util.utcnow() - FORCE_REFRESH_INTERVAL
+        self._snapshot: bytes | None = None
+        self._snapshot_expires_at = dt_util.utcnow()
         self._attr_unique_id = f"{device.id}-{description.key}"
         if (
             not isinstance(device, RingOther)
@@ -137,6 +142,11 @@ class RingCam(RingEntity[RingCameraDevice], Camera):
             self._attr_motion_detection_enabled = device.motion_detection
         if description.live_stream:
             self._attr_supported_features |= CameraEntityFeature.STREAM
+            # Ring live view sessions are full duplex: the camera plays the
+            # audio track the client sends on the WebRTC connection.
+            self._attr_camera_entity_capabilities = CameraEntityCapabilities(
+                two_way_audio=True
+            )
 
     @callback
     @override
@@ -186,7 +196,7 @@ class RingCam(RingEntity[RingCameraDevice], Camera):
         """Return a still image response from the camera."""
         if self._video_url is None:
             if isinstance(self._device, RingOther):
-                return await self._async_get_fresh_snapshot()
+                return await self._async_get_snapshot()
 
             if not self._device.has_subscription:
                 raise HomeAssistantError(
@@ -210,9 +220,13 @@ class RingCam(RingEntity[RingCameraDevice], Camera):
         return image
 
     @exception_wrap
-    async def _async_get_fresh_snapshot(self) -> bytes | None:
-        """Get a fresh snapshot from the camera."""
-        return await self._device.async_take_snapshot()
+    async def _async_get_snapshot(self) -> bytes | None:
+        """Get a snapshot from the camera, reusing a recent one."""
+        utcnow = dt_util.utcnow()
+        if self._snapshot is None or utcnow >= self._snapshot_expires_at:
+            self._snapshot = await self._device.async_take_snapshot()
+            self._snapshot_expires_at = utcnow + SNAPSHOT_CACHE_INTERVAL
+        return self._snapshot
 
     @override
     async def handle_async_mjpeg_stream(
@@ -258,7 +272,7 @@ class RingCam(RingEntity[RingCameraDevice], Camera):
                     )
                 )
 
-        await self._device.generate_async_webrtc_stream(
+        return await self._device.generate_async_webrtc_stream(
             offer_sdp, session_id, message_wrapper, keep_alive_timeout=None
         )
 
