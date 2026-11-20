@@ -7,7 +7,12 @@ from homeassistant.components.binary_sensor import DOMAIN as BINARY_SENSOR_DOMAI
 from homeassistant.components.camera import DOMAIN as CAMERA_DOMAIN
 from homeassistant.components.light import DOMAIN as LIGHT_DOMAIN
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
-from homeassistant.const import CONF_DEVICE_ID, CONF_TOKEN, CONF_USERNAME
+from homeassistant.const import (
+    CONF_DEVICE_ID,
+    CONF_TOKEN,
+    CONF_USERNAME,
+    STATE_UNAVAILABLE,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.setup import async_setup_component
@@ -23,7 +28,11 @@ from custom_components.ring.const import (
     CONF_LISTEN_CREDENTIALS,
     SCAN_INTERVAL,
 )
-from custom_components.ring.coordinator import RingConfigEntry, RingEventListener
+from custom_components.ring.coordinator import (
+    LISTEN_RETRY_INTERVAL,
+    RingConfigEntry,
+    RingEventListener,
+)
 
 from .conftest import MOCK_HARDWARE_ID
 from .device_mocks import FRONT_DOOR_DEVICE_ID
@@ -520,6 +529,46 @@ async def test_no_listen_start(
     assert "Ring event listener failed to start after 10 seconds" in [
         record.message for record in caplog.records if record.levelname == "WARNING"
     ]
+
+
+@pytest.mark.parametrize(
+    "start_side_effect",
+    [None, TimeoutError(), RingError("subscribe failed")],
+    ids=["not_started", "timeout", "ring_error"],
+)
+async def test_listen_start_retried(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    mock_ring_event_listener_class: type[RingEventListener],
+    mock_ring_client: Ring,
+    mock_config_entry: MockConfigEntry,
+    start_side_effect: Exception | None,
+) -> None:
+    """Test the listener start is retried so event entities become available."""
+    listener = mock_ring_event_listener_class.return_value
+    listener.started = False
+    listener.start.side_effect = start_side_effect
+
+    mock_config_entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert listener.start.call_count == 1
+    listener.add_notification_callback.assert_not_called()
+    assert hass.states.get("event.front_door_ding").state == STATE_UNAVAILABLE
+
+    listener.start.side_effect = None
+    listener.started = True
+    freezer.tick(LISTEN_RETRY_INTERVAL)
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert listener.start.call_count == 2
+    listener.add_notification_callback.assert_called_once()
+    assert hass.states.get("event.front_door_ding").state != STATE_UNAVAILABLE
+
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
 
 
 @pytest.mark.usefixtures("mock_setup_entry")

@@ -1,5 +1,6 @@
 """Data coordinators for the ring integration."""
 
+import asyncio
 from asyncio import TaskGroup
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
@@ -27,6 +28,10 @@ from python_ring.listen import RingEventListener
 from .const import DOMAIN, SCAN_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
+
+# Delay before retrying a failed start of the event listener, doubled per attempt
+LISTEN_RETRY_INTERVAL = 30
+LISTEN_RETRY_MAX_INTERVAL = 900
 
 
 @dataclass
@@ -145,6 +150,7 @@ class RingListenCoordinator(BaseDataUpdateCoordinatorProtocol):
         )
         self._listeners: dict[CALLBACK_TYPE, tuple[CALLBACK_TYPE, object | None]] = {}
         self._listen_callback_id: int | None = None
+        self._retry_task: asyncio.Task[None] | None = None
 
         self.config_entry = config_entry
         self.start_timeout = 10
@@ -160,33 +166,70 @@ class RingListenCoordinator(BaseDataUpdateCoordinatorProtocol):
 
     async def async_shutdown(self) -> None:
         """Cancel any scheduled call, and ignore new runs."""
-        if self.event_listener.started:
+        if self.event_listener.started or self._retry_task is not None:
             await self._async_stop_listen()
 
     async def _async_stop_listen(self) -> None:
-        self.logger.debug("Stopped ring listener")
+        self.logger.debug("Stopping ring listener")
+        if self._retry_task is not None:
+            self._retry_task.cancel()
+            self._retry_task = None
         await self.event_listener.stop()
+        # Stopping the listener drops all of its notification callbacks
+        self._listen_callback_id = None
         self.logger.debug("Stopped ring listener")
 
-    async def _async_start_listen(self) -> None:
-        """Start listening for realtime events."""
+    async def _async_try_start_listen(self) -> bool:
+        """Try to start the listener, return whether it is started."""
         self.logger.debug("Starting ring listener.")
-        await self.event_listener.start(
-            timeout=self.start_timeout,
-        )
-        if self.event_listener.started is True:
-            self.logger.debug("Started ring listener")
-        else:
+        try:
+            await self.event_listener.start(
+                timeout=self.start_timeout,
+            )
+        except Exception as err:  # noqa: BLE001
+            # The library raises on FCM registration, Ring subscription and
+            # timeout errors; none of them should end the listener for good.
+            self.logger.warning(
+                "Ring event listener failed to start: %s",
+                repr(err),
+            )
+            return False
+        if self.event_listener.started is not True:
             self.logger.warning(
                 "Ring event listener failed to start after %s seconds",
                 self.start_timeout,
             )
-        self._listen_callback_id = self.event_listener.add_notification_callback(
-            self._on_event
-        )
+            return False
+        self.logger.debug("Started ring listener")
+        if self._listen_callback_id is None:
+            self._listen_callback_id = self.event_listener.add_notification_callback(
+                self._on_event
+            )
         self.index_alerts()
         # Update the listeners so they switch from Unavailable to Unknown
         self._async_update_listeners()
+        return True
+
+    async def _async_start_listen(self) -> None:
+        """Start listening for realtime events."""
+        if await self._async_try_start_listen() or self._retry_task is not None:
+            return
+        self._retry_task = self.config_entry.async_create_background_task(
+            self.hass,
+            self._async_retry_start_listen(),
+            "Ring event listener retry",
+        )
+
+    async def _async_retry_start_listen(self) -> None:
+        """Keep trying to start the listener until it is started."""
+        delay = LISTEN_RETRY_INTERVAL
+        while self._listeners:
+            self.logger.debug("Retrying ring listener start in %s seconds", delay)
+            await asyncio.sleep(delay)
+            if not self._listeners or await self._async_try_start_listen():
+                break
+            delay = min(delay * 2, LISTEN_RETRY_MAX_INTERVAL)
+        self._retry_task = None
 
     def _on_event(self, event: RingEvent) -> None:
         self.logger.debug("Ring event received: %s", event)
