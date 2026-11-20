@@ -1,5 +1,6 @@
 """The tests for the Ring component."""
 
+import logging
 from unittest.mock import patch
 
 from freezegun.api import FrozenDateTimeFactory
@@ -569,6 +570,28 @@ async def test_listen_start_retried(
 
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
     await hass.async_block_till_done()
+
+
+@pytest.mark.parametrize(
+    ("debug", "expected"),
+    [
+        (False, ["all attempts failed"]),
+        (True, ["attempt 1 out of 2", "all attempts failed"]),
+    ],
+)
+def test_fcm_attempt_warnings_filtered(
+    caplog: pytest.LogCaptureFixture, debug: bool, expected: list[str]
+) -> None:
+    """Test single FCM attempt warnings are only logged with debug logging."""
+    logger = logging.getLogger("firebase_messaging.fcmregister")
+    caplog.set_level(logging.DEBUG if debug else logging.INFO, logger=logger.name)
+
+    logger.warning("attempt %s out of %s", 1, 2)
+    logger.error("all attempts failed")
+
+    assert [
+        record.getMessage() for record in caplog.records if record.name == logger.name
+    ] == expected
 
 
 @pytest.mark.usefixtures("mock_setup_entry")

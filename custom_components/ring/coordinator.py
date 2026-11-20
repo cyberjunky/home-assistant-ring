@@ -29,6 +29,25 @@ from .const import DOMAIN, SCAN_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
 
+_FCM_REGISTER_LOGGER = logging.getLogger("firebase_messaging.fcmregister")
+
+
+def _filter_fcm_attempt_warnings(record: logging.LogRecord) -> bool:
+    """Hide warnings about single FCM attempts unless debug logging is on.
+
+    Google regularly rejects the first registration attempt of a new client and
+    the library retries. When every attempt fails the library logs an error and
+    the listener start failure is logged by the coordinator.
+    """
+    return (
+        record.levelno != logging.WARNING
+        or "attempt %s out" not in str(record.msg)
+        or _FCM_REGISTER_LOGGER.isEnabledFor(logging.DEBUG)
+    )
+
+
+_FCM_REGISTER_LOGGER.addFilter(_filter_fcm_attempt_warnings)
+
 # Delay before retrying a failed start of the event listener, doubled per attempt
 LISTEN_RETRY_INTERVAL = 30
 LISTEN_RETRY_MAX_INTERVAL = 900
