@@ -27,6 +27,7 @@ from python_ring import (
 )
 from python_ring.listen import RingEventListener
 
+from . import fcm_compat  # noqa: F401  # patches the push client on import
 from .const import DOMAIN, SCAN_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
