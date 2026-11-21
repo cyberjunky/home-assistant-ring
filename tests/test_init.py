@@ -31,6 +31,7 @@ from custom_components.ring.const import (
 )
 from custom_components.ring.coordinator import (
     LISTEN_RETRY_INTERVAL,
+    LISTEN_WATCHDOG_INTERVAL,
     RingConfigEntry,
     RingEventListener,
 )
@@ -565,6 +566,47 @@ async def test_listen_start_retried(
     await hass.async_block_till_done(wait_background_tasks=True)
 
     assert listener.start.call_count == 2
+    listener.add_notification_callback.assert_called_once()
+    assert hass.states.get("event.front_door_ding").state != STATE_UNAVAILABLE
+
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_listen_restarted_when_receiver_stops(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+    mock_ring_event_listener_class: type[RingEventListener],
+    mock_ring_client: Ring,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test the listener is restarted when its push receiver stops by itself."""
+    listener = mock_ring_event_listener_class.return_value
+
+    mock_config_entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert listener.start.call_count == 1
+    assert hass.states.get("event.front_door_ding").state != STATE_UNAVAILABLE
+
+    # The receiver shuts itself down, e.g. after repeated connection errors
+    listener.started = False
+    freezer.tick(LISTEN_WATCHDOG_INTERVAL)
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+
+    assert "Ring event listener stopped unexpectedly, restarting" in caplog.text
+    assert hass.states.get("event.front_door_ding").state == STATE_UNAVAILABLE
+
+    listener.started = True
+    freezer.tick(LISTEN_RETRY_INTERVAL)
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert listener.start.call_count == 2
+    # The notification callback survives a restart of the listener
     listener.add_notification_callback.assert_called_once()
     assert hass.states.get("event.front_door_ding").state != STATE_UNAVAILABLE
 
