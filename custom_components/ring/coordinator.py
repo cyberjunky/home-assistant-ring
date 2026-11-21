@@ -4,12 +4,14 @@ import asyncio
 from asyncio import TaskGroup
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 import logging
 from typing import Any, override
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import (
     BaseDataUpdateCoordinatorProtocol,
     DataUpdateCoordinator,
@@ -51,6 +53,8 @@ _FCM_REGISTER_LOGGER.addFilter(_filter_fcm_attempt_warnings)
 # Delay before retrying a failed start of the event listener, doubled per attempt
 LISTEN_RETRY_INTERVAL = 30
 LISTEN_RETRY_MAX_INTERVAL = 900
+# How often to check that a started event listener is still running
+LISTEN_WATCHDOG_INTERVAL = timedelta(seconds=60)
 
 
 @dataclass
@@ -170,6 +174,7 @@ class RingListenCoordinator(BaseDataUpdateCoordinatorProtocol):
         self._listeners: dict[CALLBACK_TYPE, tuple[CALLBACK_TYPE, object | None]] = {}
         self._listen_callback_id: int | None = None
         self._retry_task: asyncio.Task[None] | None = None
+        self._watchdog_unsub: CALLBACK_TYPE | None = None
 
         self.config_entry = config_entry
         self.start_timeout = 10
@@ -185,11 +190,18 @@ class RingListenCoordinator(BaseDataUpdateCoordinatorProtocol):
 
     async def async_shutdown(self) -> None:
         """Cancel any scheduled call, and ignore new runs."""
-        if self.event_listener.started or self._retry_task is not None:
+        if (
+            self.event_listener.started
+            or self._retry_task is not None
+            or self._watchdog_unsub is not None
+        ):
             await self._async_stop_listen()
 
     async def _async_stop_listen(self) -> None:
         self.logger.debug("Stopping ring listener")
+        if self._watchdog_unsub is not None:
+            self._watchdog_unsub()
+            self._watchdog_unsub = None
         if self._retry_task is not None:
             self._retry_task.cancel()
             self._retry_task = None
@@ -227,7 +239,37 @@ class RingListenCoordinator(BaseDataUpdateCoordinatorProtocol):
         self.index_alerts()
         # Update the listeners so they switch from Unavailable to Unknown
         self._async_update_listeners()
+        if self._watchdog_unsub is None:
+            self._watchdog_unsub = async_track_time_interval(
+                self.hass,
+                self._async_check_listener,
+                LISTEN_WATCHDOG_INTERVAL,
+                name="Ring event listener watchdog",
+                cancel_on_shutdown=True,
+            )
         return True
+
+    @callback
+    def _async_check_listener(self, _now: datetime) -> None:
+        """Restart the listener when its push receiver stopped by itself.
+
+        The FCM push receiver shuts itself down after repeated connection,
+        login or callback errors. Without a restart no further events arrive.
+        """
+        if (
+            not self._listeners
+            or self.event_listener.started
+            or self._retry_task is not None
+        ):
+            return
+        self.logger.warning("Ring event listener stopped unexpectedly, restarting")
+        # Update the listeners so they switch to Unavailable
+        self._async_update_listeners()
+        self._retry_task = self.config_entry.async_create_background_task(
+            self.hass,
+            self._async_retry_start_listen(),
+            "Ring event listener retry",
+        )
 
     async def _async_start_listen(self) -> None:
         """Start listening for realtime events."""
